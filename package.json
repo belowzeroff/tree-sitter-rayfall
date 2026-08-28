@@ -1,0 +1,33 @@
+{
+  "name": "tree-sitter-rayfall",
+  "version": "0.1.0",
+  "description": "Tree-sitter grammar for the Rayfall query language",
+  "license": "MIT",
+  "repository": "github:vbmithr/tree-sitter-rayfall",
+  "keywords": [
+    "incremental",
+    "parsing",
+    "rayfall",
+    "tree-sitter"
+  ],
+  "files": [
+    "grammar.js",
+    "rayfall-mode.el",
+    "queries",
+    "src/**"
+  ],
+  "scripts": {
+    "generate": "tree-sitter generate --abi 14",
+    "test": "tree-sitter test"
+  },
+  "devDependencies": {
+    "tree-sitter-cli": "^0.25.0"
+  },
+  "tree-sitter": [
+    {
+      "scope": "source.rayfall",
+      "file-types": ["rfl"],
+      "highlights": "queries/highlights.scm"
+    }
+  ]
+}

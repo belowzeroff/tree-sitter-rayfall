@@ -1,0 +1,67 @@
+==================
+calls and vectors
+==================
+
+(do
+  (set square (fn [x] (* x x)))
+  (square 5))
+
+---
+
+(source_file
+  (call
+    function: (identifier)
+    argument: (call
+      function: (identifier)
+      argument: (identifier)
+      argument: (call
+        function: (identifier)
+        argument: (vector element: (identifier))
+        argument: (call
+          function: (identifier)
+          argument: (identifier)
+          argument: (identifier))))
+    argument: (call
+      function: (identifier)
+      argument: (integer))))
+
+==================
+query dictionary
+==================
+
+(select {from: trades
+         where: (> price 100)
+         by: {sym: sym}
+         "total size": (sum size)})
+
+---
+
+(source_file
+  (call
+    function: (identifier)
+    argument: (dictionary
+      (pair key: (dictionary_key) value: (identifier))
+      (pair key: (dictionary_key) value: (call
+        function: (identifier)
+        argument: (identifier)
+        argument: (integer)))
+      (pair key: (dictionary_key) value: (dictionary
+        (pair key: (dictionary_key) value: (identifier))))
+      (pair key: (string) value: (call
+        function: (identifier)
+        argument: (identifier))))))
+
+==================
+empty containers and multiple forms
+==================
+
+() [] {} (set x 1) x
+
+---
+
+(source_file
+  (call)
+  (vector)
+  (dictionary)
+  (call function: (identifier) argument: (identifier) argument: (integer))
+  (identifier))

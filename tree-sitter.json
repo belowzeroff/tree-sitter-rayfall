@@ -1,0 +1,29 @@
+{
+  "grammars": [
+    {
+      "name": "rayfall",
+      "camelcase": "Rayfall",
+      "scope": "source.rayfall",
+      "path": ".",
+      "file-types": ["rfl"],
+      "highlights": "queries/highlights.scm"
+    }
+  ],
+  "metadata": {
+    "version": "0.1.0",
+    "license": "MIT",
+    "description": "Tree-sitter grammar for the Rayfall query language",
+    "authors": [
+      {
+        "name": "Rayforce contributors"
+      }
+    ],
+    "links": {
+      "repository": "https://github.com/vbmithr/tree-sitter-rayfall"
+    }
+  },
+  "bindings": {
+    "c": true,
+    "node": false
+  }
+}

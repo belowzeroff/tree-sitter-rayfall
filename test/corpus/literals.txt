@@ -1,0 +1,31 @@
+==================
+scalar literals
+==================
+
+42 -17 12h 500i 3.14 -0.5 1e6 2.5e-3 true false
+0N 0Nl 0Ni 0Nh 0Nf 0Nd 0Nt 0Np 0xff
+2024.01.15 09:30:00.000 2024.01.15D09:30:00.000000000
+"hello\nworld" 'price :keyword 'a' '\n'
+
+---
+
+(source_file
+  (integer) (integer) (integer) (integer) (float) (float) (float) (float)
+  (boolean) (boolean)
+  (null) (null) (null) (null) (null) (null) (null) (null) (hexadecimal)
+  (date) (time) (timestamp)
+  (string) (quoted_symbol) (keyword) (character) (character))
+
+==================
+names and comments
+==================
+
+; leading comment
+.sys cfg.db.host nil? + <= not-in ; trailing comment
+
+---
+
+(source_file
+  (comment)
+  (identifier) (identifier) (identifier) (identifier) (identifier) (identifier)
+  (comment))
