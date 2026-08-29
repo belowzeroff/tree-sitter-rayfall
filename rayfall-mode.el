@@ -262,14 +262,16 @@ output remains available in the Rayfall REPL buffer."
         (setq rayfall--eval-result-overlay overlay)
         (add-hook 'after-change-functions #'rayfall--clear-eval-result nil t)))))
 
-(defun rayfall--finish-pending-eval ()
-  "Capture completed process output and show it in the source buffer."
+(defun rayfall--finish-pending-eval (&optional output-end)
+  "Capture process output through OUTPUT-END and show it in the source buffer.
+When OUTPUT-END is nil, use the current process mark."
   (when rayfall-repl--pending-eval
-    (pcase-let ((`(,source ,source-position ,output-start)
+    (pcase-let ((`(,source ,source-position ,output-start ,_delimiter)
                  rayfall-repl--pending-eval))
       (setq rayfall-repl--pending-eval nil)
       (let* ((process (get-buffer-process (current-buffer)))
-             (output-end (and process (process-mark process)))
+             (output-end (or output-end
+                             (and process (process-mark process))))
              (result
               (and output-end
                    (marker-position output-start)
@@ -280,6 +282,27 @@ output remains available in the Rayfall REPL buffer."
           (rayfall--display-eval-result source source-position result)))
       (set-marker source-position nil)
       (set-marker output-start nil))))
+
+(defun rayfall--complete-pending-eval ()
+  "Finish the pending evaluation if its completion delimiter has arrived."
+  (when rayfall-repl--pending-eval
+    (pcase-let ((`(,_source ,_source-position ,output-start ,delimiter)
+                 rayfall-repl--pending-eval))
+      (let ((process (get-buffer-process (current-buffer)))
+            delimiter-start delimiter-end)
+        (when (and process (marker-position output-start))
+          (save-excursion
+            (goto-char output-start)
+            (when (re-search-forward
+                   (concat "^" (regexp-quote delimiter) "\r?\n")
+                   (process-mark process) t)
+              (setq delimiter-start (match-beginning 0)
+                    delimiter-end (match-end 0))))
+          (when delimiter-start
+            (rayfall--finish-pending-eval delimiter-start)
+            (let ((inhibit-read-only t))
+              (delete-region delimiter-start delimiter-end))
+            t))))))
 
 (defun rayfall--insert-prompt ()
   "Insert a synthetic Rayfall prompt at the process mark."
@@ -300,16 +323,17 @@ output remains available in the Rayfall REPL buffer."
 (defun rayfall--prompt-after-output (_output)
   "Debounce insertion of the synthetic prompt after process output."
   (rayfall--cancel-prompt-timer)
-  (let ((buffer (current-buffer)))
-    (setq rayfall-repl--prompt-timer
-          (run-at-time
-           rayfall-repl-prompt-delay nil
-           (lambda ()
-             (when (buffer-live-p buffer)
-               (with-current-buffer buffer
-                 (setq rayfall-repl--prompt-timer nil)
-                 (rayfall--finish-pending-eval)
-                 (rayfall--insert-prompt))))))))
+  (when (or (not rayfall-repl--pending-eval)
+            (rayfall--complete-pending-eval))
+    (let ((buffer (current-buffer)))
+      (setq rayfall-repl--prompt-timer
+            (run-at-time
+             rayfall-repl-prompt-delay nil
+             (lambda ()
+               (when (buffer-live-p buffer)
+                 (with-current-buffer buffer
+                   (setq rayfall-repl--prompt-timer nil)
+                   (rayfall--insert-prompt)))))))))
 
 (defun rayfall--repl-sentinel (process event)
   "Record PROCESS termination described by EVENT and save history."
@@ -389,23 +413,28 @@ When RESULT-POSITION is non-nil, display the resulting output there."
     (with-current-buffer rayfall-repl-buffer
       (setq rayfall-repl--source-buffer source)
       (rayfall--cancel-prompt-timer)
-      ;; Output is delimited by the same idle period used for the synthetic
-      ;; prompt.  Complete an older request before installing new markers.
-      (rayfall--finish-pending-eval)
+      (when rayfall-repl--pending-eval
+        (user-error "A Rayfall evaluation is still in progress"))
       (let* ((process (get-buffer-process (current-buffer)))
              (mark (process-mark process))
+             (delimiter (format "__rayfall_emacs_%x_%x__"
+                                (emacs-pid) (random most-positive-fixnum)))
              (inhibit-read-only t))
         (goto-char mark)
         (insert-before-markers string)
         (unless (string-suffix-p "\n" string)
           (insert-before-markers "\n"))
-        (when (and rayfall-display-eval-results result-position)
+        (when result-position
           (setq rayfall-repl--pending-eval
                 (list source
                       source-position
-                      (copy-marker mark)))))
-      (comint-send-string (get-buffer-process (current-buffer))
-                          (concat (string-trim-right string) "\n")))))
+                      (copy-marker mark)
+                      delimiter)))
+        (comint-send-string process
+                            (concat (string-trim-right string) "\n"
+                                    (and result-position
+                                         (format "(println \"%s\")\n"
+                                                 delimiter))))))))
 
 (defun rayfall-send-region (start end)
   "Send the region between START and END to inferior Rayfall."

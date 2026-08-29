@@ -78,7 +78,8 @@
               (insert "\33[32m3\33[0m\n")
               (let ((output-end (copy-marker (point-max))))
                 (setq rayfall-repl--pending-eval
-                      (list source source-position (copy-marker (point-min))))
+                      (list source source-position (copy-marker (point-min))
+                            "delimiter"))
                 (cl-letf (((symbol-function 'get-buffer-process)
                            (lambda (&optional _buffer) 'test-process))
                           ((symbol-function 'process-mark)
@@ -88,6 +89,38 @@
                             (overlay-get rayfall--eval-result-overlay
                                          'after-string))
                            "  ⇒ 3"))))
+      (kill-buffer source)
+      (kill-buffer repl))))
+
+(ert-deftest rayfall-completes-output-only-at-delimiter ()
+  (let ((source (generate-new-buffer " *rayfall-test-source*"))
+        (repl (generate-new-buffer " *rayfall-test-repl*")))
+    (unwind-protect
+        (with-current-buffer source
+          (insert ":env")
+          (let ((source-position (copy-marker (point-max))))
+            (with-current-buffer repl
+              (insert "first chunk\n")
+              (let ((process-mark (copy-marker (point-max))))
+                (setq rayfall-repl--pending-eval
+                      (list source source-position (copy-marker (point-min))
+                            "__done__"))
+                (cl-letf (((symbol-function 'get-buffer-process)
+                           (lambda (&optional _buffer) 'test-process))
+                          ((symbol-function 'process-mark)
+                           (lambda (_process) process-mark)))
+                  (should-not (rayfall--complete-pending-eval))
+                  (should rayfall-repl--pending-eval)
+                  (goto-char (point-max))
+                  (insert "second chunk\n__done__\n")
+                  (set-marker process-mark (point-max))
+                  (should (rayfall--complete-pending-eval))
+                  (should-not rayfall-repl--pending-eval)
+                  (should-not (string-match-p "__done__" (buffer-string))))))
+            (should (equal (substring-no-properties
+                            (overlay-get rayfall--eval-result-overlay
+                                         'after-string))
+                           "  ⇒ first chunk\nsecond chunk"))))
       (kill-buffer source)
       (kill-buffer repl))))
 
@@ -107,7 +140,9 @@
                        (lambda (_process) (with-current-buffer repl
                                             (point-max-marker))))
                       ((symbol-function 'comint-send-string)
-                       (lambda (&rest _ignored))))
+                       (lambda (_process string)
+                         (should (string-match-p
+                                  "(println \"__rayfall_emacs_" string)))))
               (rayfall-send-string (buffer-string) (point-max))
               (should (eq (marker-buffer
                            (cadr (with-current-buffer repl
