@@ -63,6 +63,12 @@ Files ending in `.rfl` then open in `rayfall-mode`. The main commands are:
 The inferior process runs through a pipe because Rayforce enables its own raw
 terminal editor on a PTY. Comint therefore owns input editing and history,
 while the Rayforce process remains alive and preserves definitions between
-evaluations. Use a prefix argument with `M-x rayfall-repl` to edit the launch
+evaluations. Results sent with the evaluation commands are also displayed as
+virtual text immediately after the evaluated expression; they remain in the
+REPL and disappear from the source buffer on the next edit or evaluation.
+Customize `rayfall-display-eval-results` to disable the inline display and
+`rayfall-eval-result-face` to change its appearance.
+
+Use a prefix argument with `M-x rayfall-repl` to edit the launch
 command for a particular session. Customize `rayfall-program` and
 `rayfall-program-arguments` for persistent changes.

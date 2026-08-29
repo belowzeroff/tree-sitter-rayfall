@@ -54,11 +54,26 @@ adds one after the output stream becomes idle."
   :type 'number
   :group 'rayfall)
 
+(defcustom rayfall-display-eval-results t
+  "Whether to display evaluation results inline in Rayfall source buffers.
+The result is shown after the expression as virtual text and is removed when
+the source buffer is edited or another expression is evaluated.  The complete
+output remains available in the Rayfall REPL buffer."
+  :type 'boolean
+  :group 'rayfall)
+
+(defface rayfall-eval-result-face
+  '((t :inherit shadow))
+  "Face used for inline Rayfall evaluation results."
+  :group 'rayfall)
+
 (defvar rayfall-repl-buffer nil
   "The active inferior Rayfall buffer.")
 
 (defvar-local rayfall-repl--prompt-timer nil)
 (defvar-local rayfall-repl--source-buffer nil)
+(defvar-local rayfall-repl--pending-eval nil)
+(defvar-local rayfall--eval-result-overlay nil)
 
 (defvar rayfall-mode-syntax-table
   (let ((table (make-syntax-table)))
@@ -158,7 +173,23 @@ adds one after the output stream becomes idle."
   (let ((node (rayfall--node-at-point)))
     (unless (and node (not (string= (treesit-node-type node) "source_file")))
       (user-error "No Rayfall expression at point"))
-    (cons (treesit-node-start node) (treesit-node-end node))))
+    ;; Tree-sitter accepts adjacent top-level tokens as separate forms, while
+    ;; the Rayforce reader treats them as one malformed token (for example,
+    ;; `0X').  Include siblings with no separating whitespace so evaluation
+    ;; reports the same syntax/name error that Rayforce would report for the
+    ;; text the user sees as one expression.
+    (let ((start-node node)
+          (end-node node)
+          sibling)
+      (while (and (setq sibling (treesit-node-prev-sibling start-node t))
+                  (= (treesit-node-end sibling)
+                     (treesit-node-start start-node)))
+        (setq start-node sibling))
+      (while (and (setq sibling (treesit-node-next-sibling end-node t))
+                  (= (treesit-node-start sibling)
+                     (treesit-node-end end-node)))
+        (setq end-node sibling))
+      (cons (treesit-node-start start-node) (treesit-node-end end-node)))))
 
 (defun rayfall--imenu-index ()
   "Return an Imenu index of top-level `(set NAME (fn ...))' definitions."
@@ -209,6 +240,47 @@ adds one after the output stream becomes idle."
     (cancel-timer rayfall-repl--prompt-timer))
   (setq rayfall-repl--prompt-timer nil))
 
+(defun rayfall--clear-eval-result (&rest _ignored)
+  "Remove the inline evaluation result in the current source buffer."
+  (when (overlayp rayfall--eval-result-overlay)
+    (delete-overlay rayfall--eval-result-overlay))
+  (setq rayfall--eval-result-overlay nil)
+  (remove-hook 'after-change-functions #'rayfall--clear-eval-result t))
+
+(defun rayfall--display-eval-result (buffer position result)
+  "Display RESULT in BUFFER after POSITION as virtual text."
+  (when (and rayfall-display-eval-results
+             (buffer-live-p buffer)
+             (marker-position position)
+             (not (string-empty-p result)))
+    (with-current-buffer buffer
+      (rayfall--clear-eval-result)
+      (let ((overlay (make-overlay position position buffer)))
+        (overlay-put overlay 'after-string
+                     (propertize (concat "  ⇒ " result)
+                                 'face 'rayfall-eval-result-face))
+        (setq rayfall--eval-result-overlay overlay)
+        (add-hook 'after-change-functions #'rayfall--clear-eval-result nil t)))))
+
+(defun rayfall--finish-pending-eval ()
+  "Capture completed process output and show it in the source buffer."
+  (when rayfall-repl--pending-eval
+    (pcase-let ((`(,source ,source-position ,output-start)
+                 rayfall-repl--pending-eval))
+      (setq rayfall-repl--pending-eval nil)
+      (let* ((process (get-buffer-process (current-buffer)))
+             (output-end (and process (process-mark process)))
+             (result
+              (and output-end
+                   (marker-position output-start)
+                   (string-trim
+                    (ansi-color-filter-apply
+                     (buffer-substring-no-properties output-start output-end))))))
+        (when result
+          (rayfall--display-eval-result source source-position result)))
+      (set-marker source-position nil)
+      (set-marker output-start nil))))
+
 (defun rayfall--insert-prompt ()
   "Insert a synthetic Rayfall prompt at the process mark."
   (when (rayfall--repl-live-p (current-buffer))
@@ -236,6 +308,7 @@ adds one after the output stream becomes idle."
              (when (buffer-live-p buffer)
                (with-current-buffer buffer
                  (setq rayfall-repl--prompt-timer nil)
+                 (rayfall--finish-pending-eval)
                  (rayfall--insert-prompt))))))))
 
 (defun rayfall--repl-sentinel (process event)
@@ -304,29 +377,41 @@ from the minibuffer.  The new process becomes `rayfall-repl-buffer'."
   (or (and (rayfall--repl-live-p) (get-buffer-process rayfall-repl-buffer))
       (rayfall-repl)))
 
-(defun rayfall-send-string (string)
-  "Send STRING to the active inferior Rayfall process."
+(defun rayfall-send-string (string &optional result-position)
+  "Send STRING to the active inferior Rayfall process.
+When RESULT-POSITION is non-nil, display the resulting output there."
   (unless (and (stringp string) (not (string-empty-p (string-trim string))))
     (user-error "Nothing to send"))
-  (let ((source (current-buffer)))
+  (let ((source (current-buffer))
+        (source-position (and result-position
+                              (copy-marker result-position))))
     (rayfall--ensure-repl)
     (with-current-buffer rayfall-repl-buffer
       (setq rayfall-repl--source-buffer source)
       (rayfall--cancel-prompt-timer)
+      ;; Output is delimited by the same idle period used for the synthetic
+      ;; prompt.  Complete an older request before installing new markers.
+      (rayfall--finish-pending-eval)
       (let* ((process (get-buffer-process (current-buffer)))
              (mark (process-mark process))
              (inhibit-read-only t))
         (goto-char mark)
         (insert-before-markers string)
         (unless (string-suffix-p "\n" string)
-          (insert-before-markers "\n")))
+          (insert-before-markers "\n"))
+        (when (and rayfall-display-eval-results result-position)
+          (setq rayfall-repl--pending-eval
+                (list source
+                      source-position
+                      (copy-marker mark)))))
       (comint-send-string (get-buffer-process (current-buffer))
                           (concat (string-trim-right string) "\n")))))
 
 (defun rayfall-send-region (start end)
   "Send the region between START and END to inferior Rayfall."
   (interactive "r")
-  (rayfall-send-string (buffer-substring-no-properties start end))
+  (rayfall--clear-eval-result)
+  (rayfall-send-string (buffer-substring-no-properties start end) end)
   (setq deactivate-mark t))
 
 (defun rayfall-send-expression ()
