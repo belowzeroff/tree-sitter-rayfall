@@ -28,6 +28,20 @@
     (forward-line 1)
     (should (= (current-indentation) rayfall-indent-offset))))
 
+(ert-deftest rayfall-mode-distinguishes-hyphenated-functions-from-operators ()
+  (skip-unless (treesit-ready-p 'rayfall t))
+  (with-temp-buffer
+    (insert "(sym-name x)\n(- 2 1)\n")
+    (rayfall-mode)
+    (font-lock-ensure)
+    (goto-char (point-min))
+    (search-forward "sym-name")
+    (should (eq (get-text-property (match-beginning 0) 'face)
+                'font-lock-function-call-face))
+    (search-forward "-")
+    (should (eq (get-text-property (match-beginning 0) 'face)
+                'font-lock-operator-face))))
+
 (ert-deftest rayfall-mode-includes-adjacent-top-level-tokens ()
   (skip-unless (treesit-ready-p 'rayfall t))
   (with-temp-buffer

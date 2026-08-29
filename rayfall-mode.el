@@ -96,8 +96,10 @@ output remains available in the Rayfall REPL buffer."
               "try" "update") eos))
 
 (defconst rayfall--operators
-  (regexp-opt '("+" "-" "*" "/" "%" "==" "!=" "<" "<=" ">" ">="
-                "&" "|") t))
+  (rx bos
+      (or "+" "-" "*" "/" "%" "==" "!=" "<" "<=" ">" ">="
+          "&" "|")
+      eos))
 
 (defvar rayfall--treesit-font-lock-settings
   (treesit-font-lock-rules
@@ -121,7 +123,7 @@ output remains available in the Rayfall REPL buffer."
    '((pair key: (dictionary_key) @font-lock-property-name-face))
    :language 'rayfall :feature 'identifier
    '((identifier) @font-lock-variable-use-face)
-   :language 'rayfall :feature 'function
+   :language 'rayfall :feature 'function :override t
    '((call function: (identifier) @font-lock-function-call-face))
    :language 'rayfall :feature 'definition :override t
    `((call
