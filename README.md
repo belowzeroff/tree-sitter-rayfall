@@ -59,13 +59,30 @@ Files ending in `.rfl` then open in `rayfall-mode`. The main commands are:
 | `C-c C-r` | Send the active region |
 | `C-c C-b` | Send the whole buffer |
 | `C-c C-q` | Switch to the REPL |
+| `M-.` | Jump to a `set`, `let`, or function-parameter definition |
+| `M-,` | Return from a definition jump |
+
+At point, completion candidates come from the live Rayforce session through
+`.repl.complete`, including built-ins, keywords, and user-defined global
+bindings. The mode registers this with Emacs's standard completion-at-point
+API, so it works with `completion-at-point`, Company, and Corfu without a
+mode-specific backend. Rayforce versions without `.repl.complete` cannot
+provide semantic candidates.
+
+The standard Emacs Xref commands find definitions in the current buffer and
+across `.rfl` files in the current project. This covers names introduced by
+`set` and `let`, plus function parameters; engine built-ins have no source
+location and are therefore not Xref targets.
 
 The inferior process runs through a pipe because Rayforce enables its own raw
 terminal editor on a PTY. Comint therefore owns input editing and history,
 while the Rayforce process remains alive and preserves definitions between
 evaluations. Results sent with the evaluation commands are also displayed as
-virtual text immediately after the evaluated expression; they remain in the
-REPL and disappear from the source buffer on the next edit or evaluation.
+in a popup immediately after the evaluated expression. Multiline results use
+the same precise `popup.el` rendering approach as Julia Snail and disappear
+from the source buffer on the next edit or evaluation. Source evaluations are
+hidden from the REPL by default; customize
+`rayfall-repl-display-source-evaluations` to retain them there.
 Customize `rayfall-display-eval-results` to disable the inline display and
 `rayfall-eval-result-face` to change its appearance.
 

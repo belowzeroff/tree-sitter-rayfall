@@ -3,7 +3,7 @@
 ;; Copyright (C) 2026 Rayforce contributors
 ;; Author: Rayforce contributors
 ;; Keywords: languages, processes
-;; Package-Requires: ((emacs "29.1"))
+;; Package-Requires: ((emacs "29.1") (popup "0.5.9"))
 ;; Version: 0.1.0
 ;; URL: https://github.com/vbmithr/tree-sitter-rayfall
 
@@ -18,7 +18,11 @@
 (require 'comint)
 (require 'treesit)
 (require 'ansi-color)
+(require 'cl-lib)
+(require 'popup)
+(require 'project)
 (require 'subr-x)
+(require 'xref)
 
 (defgroup rayfall nil
   "Editing and evaluating Rayfall code."
@@ -62,8 +66,19 @@ output remains available in the Rayfall REPL buffer."
   :type 'boolean
   :group 'rayfall)
 
+(defcustom rayfall-repl-display-source-evaluations nil
+  "Whether source evaluations and their results remain visible in the REPL.
+This does not affect expressions entered directly in the REPL."
+  :type 'boolean
+  :group 'rayfall)
+
+(defcustom rayfall-completion-timeout 1.0
+  "Seconds to wait for `.repl.complete' to return candidates."
+  :type 'number
+  :group 'rayfall)
+
 (defface rayfall-eval-result-face
-  '((t :inherit shadow))
+  '((t :inherit tooltip :extend t))
   "Face used for inline Rayfall evaluation results."
   :group 'rayfall)
 
@@ -71,9 +86,14 @@ output remains available in the Rayfall REPL buffer."
   "The active inferior Rayfall buffer.")
 
 (defvar-local rayfall-repl--prompt-timer nil)
+(defvar-local rayfall-repl--completion-prompt-pending nil)
 (defvar-local rayfall-repl--source-buffer nil)
 (defvar-local rayfall-repl--pending-eval nil)
+(defvar-local rayfall-repl--completion-request nil)
+(defvar-local rayfall-repl--completion-result nil)
 (defvar-local rayfall--eval-result-overlay nil)
+
+(defconst rayfall--internal-output-invisibility 'rayfall-internal-output)
 
 (defvar rayfall-mode-syntax-table
   (let ((table (make-syntax-table)))
@@ -212,6 +232,88 @@ output remains available in the Rayfall REPL buffer."
                 entries))))
     (nreverse entries)))
 
+(defun rayfall--identifier-at-point ()
+  "Return the Rayfall identifier at point, or nil."
+  (let ((node (treesit-node-at
+               (if (and (> (point) (point-min))
+                        (or (eobp) (not (looking-at-p "[[:alnum:]_.-]"))))
+                   (1- (point))
+                 (point))
+               'rayfall)))
+    (when (and node (string= (treesit-node-type node) "identifier"))
+      (treesit-node-text node t))))
+
+(defun rayfall--definition-nodes (identifier)
+  "Return definition nodes named IDENTIFIER in the current buffer."
+  (let ((root (treesit-buffer-root-node 'rayfall)) nodes)
+    (dolist (capture
+             (treesit-query-capture
+              root
+              `((call
+                 function: (identifier) @_binder
+                 argument: (identifier) @definition
+                 (:match ,(rx bos (or "set" "let") eos) @_binder))
+                (call
+                 function: (identifier) @_fn
+                 argument: (vector (identifier) @definition)
+                 (:equal @_fn "fn")))))
+      (when (and (eq (car capture) 'definition)
+                 (equal (treesit-node-text (cdr capture) t) identifier))
+        (push (cdr capture) nodes)))
+    (nreverse nodes)))
+
+(defun rayfall--definition-xrefs-in-buffer (identifier buffer &optional file)
+  "Find IDENTIFIER definitions in BUFFER, optionally attributing them to FILE."
+  (with-current-buffer buffer
+    (mapcar
+     (lambda (node)
+       (let ((position (treesit-node-start node)))
+         (xref-make
+          identifier
+          (if file
+              (save-excursion
+                (goto-char position)
+                (xref-make-file-location
+                 file (line-number-at-pos) (current-column)))
+            (xref-make-buffer-location buffer position)))))
+     (rayfall--definition-nodes identifier))))
+
+(defun rayfall--project-rayfall-files ()
+  "Return Rayfall files in the current project, excluding the current file."
+  (when-let ((project (project-current nil)))
+    (let ((current (and buffer-file-name (file-truename buffer-file-name))))
+      (seq-filter
+       (lambda (file)
+         (and (string-match-p "\\.rfl\\'" file)
+              (not (and current (equal (file-truename file) current)))))
+       (project-files project)))))
+
+(defun rayfall--xref-definitions (identifier)
+  "Return Xref definitions for IDENTIFIER in the buffer and project."
+  (let ((xrefs (rayfall--definition-xrefs-in-buffer
+                identifier (current-buffer) buffer-file-name)))
+    (dolist (file (rayfall--project-rayfall-files))
+      (condition-case nil
+          (with-temp-buffer
+            (insert-file-contents file)
+            (delay-mode-hooks (rayfall-mode))
+            (setq xrefs
+                  (nconc xrefs
+                         (rayfall--definition-xrefs-in-buffer
+                          identifier (current-buffer) file))))
+        (error nil)))
+    xrefs))
+
+(defun rayfall-xref-backend ()
+  "Return the Rayfall Xref backend for `rayfall-mode'."
+  'rayfall)
+
+(cl-defmethod xref-backend-identifier-at-point ((_backend (eql rayfall)))
+  (rayfall--identifier-at-point))
+
+(cl-defmethod xref-backend-definitions ((_backend (eql rayfall)) identifier)
+  (rayfall--xref-definitions identifier))
+
 (defvar rayfall-mode-map
   (let ((map (make-sparse-keymap)))
     (define-key map (kbd "C-c C-z") #'rayfall-repl)
@@ -242,10 +344,18 @@ output remains available in the Rayfall REPL buffer."
     (cancel-timer rayfall-repl--prompt-timer))
   (setq rayfall-repl--prompt-timer nil))
 
+(defun rayfall--hide-internal-output (output)
+  "Make internal evaluation or completion OUTPUT invisible to Comint."
+  (if (or rayfall-repl--completion-request
+          (and rayfall-repl--pending-eval
+               (not rayfall-repl-display-source-evaluations)))
+      (propertize output 'invisible rayfall--internal-output-invisibility)
+    output))
+
 (defun rayfall--clear-eval-result (&rest _ignored)
   "Remove the inline evaluation result in the current source buffer."
-  (when (overlayp rayfall--eval-result-overlay)
-    (delete-overlay rayfall--eval-result-overlay))
+  (when rayfall--eval-result-overlay
+    (ignore-errors (popup-delete rayfall--eval-result-overlay)))
   (setq rayfall--eval-result-overlay nil)
   (remove-hook 'after-change-functions #'rayfall--clear-eval-result t))
 
@@ -257,18 +367,28 @@ output remains available in the Rayfall REPL buffer."
              (not (string-empty-p result)))
     (with-current-buffer buffer
       (rayfall--clear-eval-result)
-      (let ((overlay (make-overlay position position buffer)))
-        (overlay-put overlay 'after-string
-                     (propertize (concat "  ⇒ " result)
-                                 'face 'rayfall-eval-result-face))
-        (setq rayfall--eval-result-overlay overlay)
-        (add-hook 'after-change-functions #'rayfall--clear-eval-result nil t)))))
+      (let* ((lines
+              (mapcar
+               (lambda (line)
+                 (concat (propertize " " 'face '(:background inherit))
+                         line " \n"))
+               (split-string result "\n" nil)))
+             (display-result (string-trim-right (apply #'concat lines))))
+        (setq rayfall--eval-result-overlay
+              (popup-tip display-result
+                         :point position
+                         :around nil
+                         :face 'rayfall-eval-result-face
+                         :nowait t
+                         :nostrip t)))
+      (add-hook 'after-change-functions #'rayfall--clear-eval-result nil t))))
 
 (defun rayfall--finish-pending-eval (&optional output-end)
   "Capture process output through OUTPUT-END and show it in the source buffer.
 When OUTPUT-END is nil, use the current process mark."
   (when rayfall-repl--pending-eval
-    (pcase-let ((`(,source ,source-position ,output-start ,_delimiter)
+    (pcase-let ((`(,source ,source-position ,output-start ,_delimiter
+                            ,_repl-start)
                  rayfall-repl--pending-eval))
       (setq rayfall-repl--pending-eval nil)
       (let* ((process (get-buffer-process (current-buffer)))
@@ -288,7 +408,8 @@ When OUTPUT-END is nil, use the current process mark."
 (defun rayfall--complete-pending-eval ()
   "Finish the pending evaluation if its completion delimiter has arrived."
   (when rayfall-repl--pending-eval
-    (pcase-let ((`(,_source ,_source-position ,output-start ,delimiter)
+    (pcase-let ((`(,_source ,_source-position ,output-start ,delimiter
+                             ,repl-start)
                  rayfall-repl--pending-eval))
       (let ((process (get-buffer-process (current-buffer)))
             delimiter-start delimiter-end)
@@ -303,7 +424,48 @@ When OUTPUT-END is nil, use the current process mark."
           (when delimiter-start
             (rayfall--finish-pending-eval delimiter-start)
             (let ((inhibit-read-only t))
-              (delete-region delimiter-start delimiter-end))
+              (delete-region (if rayfall-repl-display-source-evaluations
+                                 delimiter-start
+                               repl-start)
+                             delimiter-end))
+            (set-marker repl-start nil)
+            t))))))
+
+(defun rayfall--parse-completions (output)
+  "Parse the symbol vector in Rayforce completion OUTPUT."
+  (let ((text (string-trim output)))
+    (if (and (string-prefix-p "[" text)
+             (string-suffix-p "]" text))
+        (mapcar (lambda (candidate)
+                  (string-remove-prefix "'" candidate))
+                (split-string (substring text 1 -1) "[[:space:]]+" t))
+      nil)))
+
+(defun rayfall--complete-completion-request ()
+  "Consume a completed `.repl.complete' response from the REPL buffer."
+  (when rayfall-repl--completion-request
+    (pcase-let ((`(,output-start ,delimiter)
+                 rayfall-repl--completion-request))
+      (let ((process (get-buffer-process (current-buffer)))
+            delimiter-start delimiter-end)
+        (when (and process (marker-position output-start))
+          (save-excursion
+            (goto-char output-start)
+            (when (re-search-forward
+                   (concat "^" (regexp-quote delimiter) "\r?\n")
+                   (process-mark process) t)
+              (setq delimiter-start (match-beginning 0)
+                    delimiter-end (match-end 0))))
+          (when delimiter-start
+            (setq rayfall-repl--completion-result
+                  (rayfall--parse-completions
+                   (ansi-color-filter-apply
+                    (buffer-substring-no-properties
+                     output-start delimiter-start))))
+            (setq rayfall-repl--completion-request nil)
+            (let ((inhibit-read-only t))
+              (delete-region output-start delimiter-end))
+            (set-marker output-start nil)
             t))))))
 
 (defun rayfall--insert-prompt ()
@@ -311,31 +473,52 @@ When OUTPUT-END is nil, use the current process mark."
   (when (rayfall--repl-live-p (current-buffer))
     (let* ((process (get-buffer-process (current-buffer)))
            (mark (process-mark process))
-           (inhibit-read-only t))
-      (unless (save-excursion
-                (goto-char mark)
-                (equal (buffer-substring-no-properties
-                        (line-beginning-position) mark)
-                       "‣ "))
+           (inhibit-read-only t)
+           (inhibit-field-text-motion t)
+           (line (buffer-substring-no-properties
+                  (save-excursion (goto-char mark) (line-beginning-position))
+                  mark)))
+      (unless (equal line "‣ ")
         (goto-char mark)
+        ;; Hidden completion traffic can leave no prompt or several prompts,
+        ;; depending on how process markers moved while its output was erased.
+        ;; Normalize a prompt-only line instead of appending indefinitely.
+        (when (string-match-p (rx bos (* "‣ ") eos) line)
+          (delete-region (line-beginning-position) mark))
         (insert-before-markers
          (propertize "‣ " 'font-lock-face 'comint-highlight-prompt
                      'field 'prompt 'rear-nonsticky t))))))
 
 (defun rayfall--prompt-after-output (_output)
   "Debounce insertion of the synthetic prompt after process output."
-  (rayfall--cancel-prompt-timer)
-  (when (or (not rayfall-repl--pending-eval)
-            (rayfall--complete-pending-eval))
-    (let ((buffer (current-buffer)))
-      (setq rayfall-repl--prompt-timer
-            (run-at-time
-             rayfall-repl-prompt-delay nil
-             (lambda ()
-               (when (buffer-live-p buffer)
-                 (with-current-buffer buffer
-                   (setq rayfall-repl--prompt-timer nil)
-                   (rayfall--insert-prompt)))))))))
+  (cond
+   (rayfall-repl--completion-prompt-pending)
+   (rayfall-repl--completion-request
+    (when (rayfall--complete-completion-request)
+      (let ((buffer (current-buffer)))
+        (setq rayfall-repl--completion-prompt-pending t
+              rayfall-repl--prompt-timer
+              (run-at-time
+               rayfall-repl-prompt-delay nil
+               (lambda ()
+                 (when (buffer-live-p buffer)
+                   (with-current-buffer buffer
+                     (setq rayfall-repl--prompt-timer nil
+                           rayfall-repl--completion-prompt-pending nil)
+                     (rayfall--insert-prompt)))))))))
+   (t
+    (rayfall--cancel-prompt-timer)
+    (when (or (not rayfall-repl--pending-eval)
+              (rayfall--complete-pending-eval))
+      (let ((buffer (current-buffer)))
+        (setq rayfall-repl--prompt-timer
+              (run-at-time
+               rayfall-repl-prompt-delay nil
+               (lambda ()
+                 (when (buffer-live-p buffer)
+                   (with-current-buffer buffer
+                     (setq rayfall-repl--prompt-timer nil)
+                     (rayfall--insert-prompt)))))))))))
 
 (defun rayfall--repl-sentinel (process event)
   "Record PROCESS termination described by EVENT and save history."
@@ -358,6 +541,9 @@ When OUTPUT-END is nil, use the current process mark."
               (expand-file-name "rayfall-history" user-emacs-directory))
   (setq-local comment-start ";")
   (setq-local comment-end "")
+  (add-to-invisibility-spec rayfall--internal-output-invisibility)
+  (add-hook 'comint-preoutput-filter-functions
+            #'rayfall--hide-internal-output nil t)
   (add-hook 'comint-output-filter-functions #'ansi-color-process-output nil t)
   (add-hook 'comint-output-filter-functions #'rayfall--prompt-after-output nil t)
   (ignore-errors (comint-read-input-ring t)))
@@ -403,6 +589,49 @@ from the minibuffer.  The new process becomes `rayfall-repl-buffer'."
   (or (and (rayfall--repl-live-p) (get-buffer-process rayfall-repl-buffer))
       (rayfall-repl)))
 
+(defun rayfall--completion-candidates (prefix)
+  "Return live Rayforce completion candidates for PREFIX."
+  (let ((process (rayfall--ensure-repl)))
+    (with-current-buffer rayfall-repl-buffer
+      (unless (or rayfall-repl--pending-eval
+                  rayfall-repl--completion-request)
+        (rayfall--cancel-prompt-timer)
+        (let* ((output-start (copy-marker (process-mark process)))
+               (delimiter (format "__rayfall_complete_%x_%x__"
+                                  (emacs-pid) (random most-positive-fixnum)))
+               (deadline (+ (float-time) rayfall-completion-timeout)))
+          (setq rayfall-repl--completion-result nil
+                rayfall-repl--completion-request
+                (list output-start delimiter))
+          (comint-send-string
+           process
+           (format "(println (.repl.complete %S))\n(println \"%s\")\n"
+                   prefix delimiter))
+          (while (and rayfall-repl--completion-request
+                      (< (float-time) deadline))
+            (accept-process-output process 0.05))
+          ;; Company may time out at the same instant the delimiter enters the
+          ;; buffer, before the output hook consumes it.  Check once directly.
+          (when rayfall-repl--completion-request
+            (rayfall--complete-completion-request))
+          ;; Never let a failed or partial completion block later evaluation.
+          (when rayfall-repl--completion-request
+            (set-marker (car rayfall-repl--completion-request) nil)
+            (setq rayfall-repl--completion-request nil))
+          rayfall-repl--completion-result)))))
+
+(defun rayfall-completion-at-point ()
+  "Complete the Rayfall name at point using the live Rayforce session."
+  (let ((end (point))
+        (start (save-excursion
+                 (skip-chars-backward "A-Za-z0-9_!#$%&*+,-./:<=>?@^|~")
+                 (point))))
+    (when (< start end)
+      (let* ((prefix (buffer-substring-no-properties start end))
+             (candidates (rayfall--completion-candidates prefix)))
+        (when candidates
+          (list start end candidates :exclusive 'no))))))
+
 (defun rayfall-send-string (string &optional result-position)
   "Send STRING to the active inferior Rayfall process.
 When RESULT-POSITION is non-nil, display the resulting output there."
@@ -417,21 +646,33 @@ When RESULT-POSITION is non-nil, display the resulting output there."
       (rayfall--cancel-prompt-timer)
       (when rayfall-repl--pending-eval
         (user-error "A Rayfall evaluation is still in progress"))
+      (when rayfall-repl--completion-request
+        (user-error "A Rayfall completion request is still in progress"))
       (let* ((process (get-buffer-process (current-buffer)))
              (mark (process-mark process))
+             (repl-start (marker-position mark))
              (delimiter (format "__rayfall_emacs_%x_%x__"
                                 (emacs-pid) (random most-positive-fixnum)))
              (inhibit-read-only t))
         (goto-char mark)
-        (insert-before-markers string)
+        (insert-before-markers
+         (if rayfall-repl-display-source-evaluations
+             string
+           (propertize string
+                       'invisible rayfall--internal-output-invisibility)))
         (unless (string-suffix-p "\n" string)
-          (insert-before-markers "\n"))
+          (insert-before-markers
+           (if rayfall-repl-display-source-evaluations
+               "\n"
+             (propertize "\n"
+                         'invisible rayfall--internal-output-invisibility))))
         (when result-position
           (setq rayfall-repl--pending-eval
                 (list source
                       source-position
                       (copy-marker mark)
-                      delimiter)))
+                      delimiter
+                      (copy-marker repl-start))))
         (comint-send-string process
                             (concat (string-trim-right string) "\n"
                                     (and result-position
@@ -492,6 +733,9 @@ When RESULT-POSITION is non-nil, display the resulting output there."
   (setq-local treesit-simple-indent-rules rayfall--treesit-indent-rules)
   (setq-local indent-tabs-mode nil)
   (setq-local imenu-create-index-function #'rayfall--imenu-index)
+  (add-hook 'completion-at-point-functions
+            #'rayfall-completion-at-point nil t)
+  (add-hook 'xref-backend-functions #'rayfall-xref-backend nil t)
   (treesit-major-mode-setup))
 
 ;;;###autoload
