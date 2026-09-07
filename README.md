@@ -80,8 +80,8 @@ while the Rayforce process remains alive and preserves definitions between
 evaluations. Results sent with the evaluation commands are also displayed as
 in a popup immediately after the evaluated expression. Multiline results use
 the same precise `popup.el` rendering approach as Julia Snail and disappear
-from the source buffer on the next edit or evaluation. Source evaluations are
-hidden from the REPL by default; customize
+from the source buffer as soon as point moves, or on the next edit or
+evaluation. Source evaluations are hidden from the REPL by default; customize
 `rayfall-repl-display-source-evaluations` to retain them there.
 Customize `rayfall-display-eval-results` to disable the inline display and
 `rayfall-eval-result-face` to change its appearance.

@@ -61,8 +61,8 @@ adds one after the output stream becomes idle."
 (defcustom rayfall-display-eval-results t
   "Whether to display evaluation results inline in Rayfall source buffers.
 The result is shown after the expression as virtual text and is removed when
-the source buffer is edited or another expression is evaluated.  The complete
-output remains available in the Rayfall REPL buffer."
+point moves, the source buffer is edited, or another expression is evaluated.
+The complete output remains available in the Rayfall REPL buffer."
   :type 'boolean
   :group 'rayfall)
 
@@ -92,6 +92,7 @@ This does not affect expressions entered directly in the REPL."
 (defvar-local rayfall-repl--completion-request nil)
 (defvar-local rayfall-repl--completion-result nil)
 (defvar-local rayfall--eval-result-overlay nil)
+(defvar-local rayfall--eval-result-point nil)
 
 (defconst rayfall--internal-output-invisibility 'rayfall-internal-output)
 
@@ -357,7 +358,16 @@ This does not affect expressions entered directly in the REPL."
   (when rayfall--eval-result-overlay
     (ignore-errors (popup-delete rayfall--eval-result-overlay)))
   (setq rayfall--eval-result-overlay nil)
-  (remove-hook 'after-change-functions #'rayfall--clear-eval-result t))
+  (setq rayfall--eval-result-point nil)
+  (remove-hook 'after-change-functions #'rayfall--clear-eval-result t)
+  (remove-hook 'post-command-hook
+               #'rayfall--clear-eval-result-after-point-move t))
+
+(defun rayfall--clear-eval-result-after-point-move ()
+  "Remove the inline evaluation result after point moves."
+  (when (and rayfall--eval-result-point
+             (/= (point) rayfall--eval-result-point))
+    (rayfall--clear-eval-result)))
 
 (defun rayfall--display-eval-result (buffer position result)
   "Display RESULT in BUFFER after POSITION as virtual text."
@@ -376,12 +386,18 @@ This does not affect expressions entered directly in the REPL."
              (display-result (string-trim-right (apply #'concat lines))))
         (setq rayfall--eval-result-overlay
               (popup-tip display-result
-                         :point position
+                         ;; `popup-create' retains its point argument.  Do not
+                         ;; give it the pending evaluation marker, which is
+                         ;; invalidated as soon as the result is displayed.
+                         :point (marker-position position)
                          :around nil
                          :face 'rayfall-eval-result-face
                          :nowait t
                          :nostrip t)))
-      (add-hook 'after-change-functions #'rayfall--clear-eval-result nil t))))
+      (setq rayfall--eval-result-point (point))
+      (add-hook 'after-change-functions #'rayfall--clear-eval-result nil t)
+      (add-hook 'post-command-hook
+                #'rayfall--clear-eval-result-after-point-move nil t))))
 
 (defun rayfall--finish-pending-eval (&optional output-end)
   "Capture process output through OUTPUT-END and show it in the source buffer.
