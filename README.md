@@ -86,6 +86,10 @@ evaluation. Source evaluations are hidden from the REPL by default; customize
 Customize `rayfall-display-eval-results` to disable the inline display and
 `rayfall-eval-result-face` to change its appearance.
 
+Evaluation commands reject unmatched brackets or quotes before sending source
+to Rayforce, preventing incomplete input from leaving the REPL waiting for a
+continuation. Complete expressions with syntax errors are reported by Rayforce.
+
 Use a prefix argument with `M-x rayfall-repl` to edit the launch
 command for a particular session. Customize `rayfall-program` and
 `rayfall-program-arguments` for persistent changes.

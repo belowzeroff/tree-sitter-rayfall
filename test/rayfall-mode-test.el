@@ -296,4 +296,15 @@
       (kill-buffer source)
       (kill-buffer repl))))
 
+(ert-deftest rayfall-rejects-unbalanced-source-before-sending ()
+  (with-temp-buffer
+    (set-syntax-table rayfall-mode-syntax-table)
+    (insert "(+ 1 2")
+    (let (sent)
+      (cl-letf (((symbol-function 'rayfall-send-string)
+                 (lambda (&rest _args) (setq sent t))))
+        (should-error (rayfall-send-region (point-min) (point-max))
+                      :type 'user-error)
+        (should-not sent)))))
+
 ;;; rayfall-mode-test.el ends here

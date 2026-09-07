@@ -695,9 +695,21 @@ When RESULT-POSITION is non-nil, display the resulting output there."
                                          (format "(println \"%s\")\n"
                                                  delimiter))))))))
 
+(defun rayfall--check-region-delimiters (start end)
+  "Signal a user error if delimiters between START and END are unbalanced."
+  (save-mark-and-excursion
+    (save-restriction
+      (narrow-to-region start end)
+      (goto-char (point-min))
+      (check-parens))))
+
 (defun rayfall-send-region (start end)
   "Send the region between START and END to inferior Rayfall."
   (interactive "r")
+  ;; Rayforce's interactive reader treats an unmatched opening delimiter as
+  ;; multiline input.  It would consequently consume our completion delimiter
+  ;; as more source and leave this evaluation pending forever.
+  (rayfall--check-region-delimiters start end)
   (rayfall--clear-eval-result)
   (rayfall-send-string (buffer-substring-no-properties start end) end)
   (setq deactivate-mark t))
