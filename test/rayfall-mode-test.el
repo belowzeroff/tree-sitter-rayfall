@@ -219,6 +219,20 @@
       (should (equal (rayfall-completion-at-point)
                      '(2 8 ("sym-name") :exclusive no))))))
 
+(ert-deftest rayfall-send-expression-prefers-active-region ()
+  (with-temp-buffer
+    (insert "first second")
+    (let (sent-bounds)
+      (cl-letf (((symbol-function 'use-region-p) (lambda () t))
+                ((symbol-function 'region-beginning) (lambda () 7))
+                ((symbol-function 'region-end) (lambda () 13))
+                ((symbol-function 'rayfall-send-region)
+                 (lambda (start end) (setq sent-bounds (cons start end))))
+                ((symbol-function 'rayfall--expression-bounds)
+                 (lambda () (ert-fail "Expression lookup should not run"))))
+        (rayfall-send-expression)
+        (should (equal sent-bounds '(7 . 13)))))))
+
 (ert-deftest rayfall-completion-overlap-returns-nil ()
   (with-temp-buffer
     (let ((rayfall-repl-buffer (current-buffer)))
@@ -286,8 +300,9 @@
                                             (point-max-marker))))
                       ((symbol-function 'comint-send-string)
                        (lambda (_process string)
-                         (should (string-match-p
-                                  "(println \"__rayfall_emacs_" string)))))
+                         (should
+                          (string-suffix-p rayfall--repl-sentinel-command
+                                           string)))))
               (rayfall-send-string (buffer-string) (point-max))
               (should (eq (marker-buffer
                            (cadr (with-current-buffer repl

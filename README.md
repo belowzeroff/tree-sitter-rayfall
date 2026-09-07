@@ -54,7 +54,7 @@ Files ending in `.rfl` then open in `rayfall-mode`. The main commands are:
 | Key | Command |
 |---|---|
 | `C-c C-z` | Start or display the Rayfall REPL |
-| `C-c C-e` / `C-M-x` | Send the outermost expression at point |
+| `C-c C-e` / `C-M-x` | Send the active region, or expression at point |
 | `C-c C-j` | Send the current line |
 | `C-c C-r` | Send the active region |
 | `C-c C-b` | Send the whole buffer |
@@ -89,6 +89,8 @@ Customize `rayfall-display-eval-results` to disable the inline display and
 Evaluation commands reject unmatched brackets or quotes before sending source
 to Rayforce, preventing incomplete input from leaving the REPL waiting for a
 continuation. Complete expressions with syntax errors are reported by Rayforce.
+Evaluation sentinels run locally, so remote IPC errors also release the pending
+request instead of blocking subsequent evaluations.
 
 Use a prefix argument with `M-x rayfall-repl` to edit the launch
 command for a particular session. Customize `rayfall-program` and

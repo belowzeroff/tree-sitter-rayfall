@@ -95,6 +95,9 @@ This does not affect expressions entered directly in the REPL."
 (defvar-local rayfall--eval-result-point nil)
 
 (defconst rayfall--internal-output-invisibility 'rayfall-internal-output)
+(defconst rayfall--repl-sentinel "[.repl.disconnect]")
+(defconst rayfall--repl-sentinel-command
+  "(.repl.complete \".repl.disconnect\")\n")
 
 (defvar rayfall-mode-syntax-table
   (let ((table (make-syntax-table)))
@@ -613,16 +616,15 @@ from the minibuffer.  The new process becomes `rayfall-repl-buffer'."
                   rayfall-repl--completion-request)
         (rayfall--cancel-prompt-timer)
         (let* ((output-start (copy-marker (process-mark process)))
-               (delimiter (format "__rayfall_complete_%x_%x__"
-                                  (emacs-pid) (random most-positive-fixnum)))
+               (delimiter rayfall--repl-sentinel)
                (deadline (+ (float-time) rayfall-completion-timeout)))
           (setq rayfall-repl--completion-result nil
                 rayfall-repl--completion-request
                 (list output-start delimiter))
           (comint-send-string
            process
-           (format "(println (.repl.complete %S))\n(println \"%s\")\n"
-                   prefix delimiter))
+           (concat (format "(println (.repl.complete %S))\n" prefix)
+                   rayfall--repl-sentinel-command))
           (while (and rayfall-repl--completion-request
                       (< (float-time) deadline))
             (accept-process-output process 0.05))
@@ -667,8 +669,7 @@ When RESULT-POSITION is non-nil, display the resulting output there."
       (let* ((process (get-buffer-process (current-buffer)))
              (mark (process-mark process))
              (repl-start (marker-position mark))
-             (delimiter (format "__rayfall_emacs_%x_%x__"
-                                (emacs-pid) (random most-positive-fixnum)))
+             (delimiter rayfall--repl-sentinel)
              (inhibit-read-only t))
         (goto-char mark)
         (insert-before-markers
@@ -692,8 +693,7 @@ When RESULT-POSITION is non-nil, display the resulting output there."
         (comint-send-string process
                             (concat (string-trim-right string) "\n"
                                     (and result-position
-                                         (format "(println \"%s\")\n"
-                                                 delimiter))))))))
+                                         rayfall--repl-sentinel-command)))))))
 
 (defun rayfall--check-region-delimiters (start end)
   "Signal a user error if delimiters between START and END are unbalanced."
@@ -715,10 +715,12 @@ When RESULT-POSITION is non-nil, display the resulting output there."
   (setq deactivate-mark t))
 
 (defun rayfall-send-expression ()
-  "Send the outermost expression at point to inferior Rayfall."
+  "Send the active region or outermost expression at point to Rayfall."
   (interactive)
-  (pcase-let ((`(,start . ,end) (rayfall--expression-bounds)))
-    (rayfall-send-region start end)))
+  (if (use-region-p)
+      (rayfall-send-region (region-beginning) (region-end))
+    (pcase-let ((`(,start . ,end) (rayfall--expression-bounds)))
+      (rayfall-send-region start end))))
 
 (defun rayfall-send-line ()
   "Send the current line to inferior Rayfall."
