@@ -21,6 +21,7 @@
 (require 'cl-lib)
 (require 'popup)
 (require 'project)
+(require 'seq)
 (require 'subr-x)
 (require 'xref)
 
@@ -41,9 +42,27 @@ pipe-backed subprocess enter server-only mode."
   :group 'rayfall)
 
 (defcustom rayfall-indent-offset 2
-  "Number of columns added when indenting a nested Rayfall form."
+  "Number of columns a body form's body is indented.
+See `rayfall-indent-body-forms'."
   :type 'integer
   :safe #'integerp
+  :group 'rayfall)
+
+(defcustom rayfall-indent-body-forms
+  '(("fn" . 1) ("do" . 0) ("while" . 1) ("times" . 1)
+    ("set" . 1) ("let" . 1))
+  "Forms indented as a head followed by a body, as in Lisp's `defun'.
+Each entry is (NAME . N): the first N arguments are the head.  A head
+argument that starts its own line is indented twice
+`rayfall-indent-offset', and a body argument once, both counted from the
+first non-blank column of the line where the form opens.  The arguments
+of every other call line up under the first argument when it shares the
+function's line, and under the function otherwise."
+  :type '(alist :key-type string :value-type integer)
+  :safe (lambda (v) (and (listp v) (seq-every-p
+                                     (lambda (e) (and (consp e) (stringp (car e))
+                                                      (integerp (cdr e))))
+                                     v)))
   :group 'rayfall)
 
 (defcustom rayfall-repl-buffer-name "*Rayfall*"
@@ -165,16 +184,107 @@ This does not affect expressions entered directly in the REPL."
      ":" @font-lock-delimiter-face))
   "Tree-sitter font-lock rules for Rayfall.")
 
-(defvar rayfall--treesit-indent-rules
-  `((rayfall
-     ((node-is ")") parent-bol 0)
-     ((node-is "]") parent-bol 0)
-     ((node-is "}") parent-bol 0)
-     ((parent-is "call") parent-bol ,rayfall-indent-offset)
-     ((parent-is "vector") parent-bol ,rayfall-indent-offset)
-     ((parent-is "dictionary") parent-bol ,rayfall-indent-offset)
-     ((parent-is "pair") parent-bol ,rayfall-indent-offset)
-     (no-node parent-bol 0)))
+;; Indentation follows classic Lisp style: arguments line up with the first
+;; argument, data elements with the first element, and the forms in
+;; `rayfall-indent-body-forms' indent their body by `rayfall-indent-offset'.
+;; One departure: a body form that opens on the same line as an enclosing
+;; body form counts its body from the outer form, so a definition such as
+;; (set f (fn [x]
+;;   body))
+;; keeps its body at column 2 instead of drifting right under the `fn'.
+
+(defun rayfall--indent-same-line-p (a b)
+  "Return non-nil when buffer positions A and B are on the same line."
+  (save-excursion
+    (goto-char (min a b))
+    (<= (max a b) (line-end-position))))
+
+(defun rayfall--indent-elements (node)
+  "Return the children of NODE that are expressions or pairs, not comments."
+  (treesit-filter-child
+   node (lambda (c) (and (treesit-node-check c 'named)
+                         (not (equal (treesit-node-type c) "comment"))))))
+
+(defun rayfall--indent-body-form-p (node)
+  "Return non-nil when NODE is a call to one of `rayfall-indent-body-forms'."
+  (and (equal (treesit-node-type node) "call")
+       (let ((fn (treesit-node-child-by-field-name node "function")))
+         (and fn (equal (treesit-node-type fn) "identifier")
+              (assoc (treesit-node-text fn t) rayfall-indent-body-forms)))))
+
+(defun rayfall--indent-body-anchor (call)
+  "Return the position a body of CALL is indented from.
+That is CALL's own parenthesis, unless CALL opens on the same line as an
+enclosing body form, as in (set f (fn [x] ...)): then it is the outermost
+such form, so nested definitions do not drift right."
+  (let ((anchor call)
+        (up (treesit-node-parent call)))
+    (while (and up (rayfall--indent-body-form-p up)
+                (rayfall--indent-same-line-p (treesit-node-start up)
+                                             (treesit-node-start anchor)))
+      (setq anchor up up (treesit-node-parent up)))
+    (treesit-node-start anchor)))
+
+(defun rayfall--indent-call (call bol)
+  "Return (ANCHOR . OFFSET) for a line starting at BOL inside CALL."
+  (let* ((open (treesit-node-start call))
+         (fn (treesit-node-child-by-field-name call "function"))
+         (args (seq-filter (lambda (c) (equal (treesit-node-field-name c) "argument"))
+                           (treesit-node-children call)))
+         (head (and fn (equal (treesit-node-type fn) "identifier")
+                    (cdr (assoc (treesit-node-text fn t) rayfall-indent-body-forms)))))
+    (cond
+     ((or (null fn) (>= (treesit-node-start fn) bol))
+      (cons open 1))
+     (head
+      (let ((index (seq-count (lambda (a) (< (treesit-node-start a) bol)) args)))
+        (cons (rayfall--indent-body-anchor call)
+              (if (< index head) (* 2 rayfall-indent-offset) rayfall-indent-offset))))
+     ((and args (< (treesit-node-start (car args)) bol)
+           (rayfall--indent-same-line-p (treesit-node-start fn)
+                                        (treesit-node-start (car args))))
+      (cons (treesit-node-start (car args)) 0))
+     (t (cons (treesit-node-start fn) 0)))))
+
+(defun rayfall--indent-target (node parent bol)
+  "Return (ANCHOR . OFFSET) for NODE, or the empty line at BOL, in PARENT."
+  (let ((open (treesit-node-start parent)))
+    (pcase (treesit-node-type parent)
+      ((guard (and node (member (treesit-node-type node) '(")" "]" "}"))))
+       (cons open 0))
+      ("call" (rayfall--indent-call parent bol))
+      ((or "vector" "dictionary")
+       (let ((first (car (rayfall--indent-elements parent))))
+         (if (and first (< (treesit-node-start first) bol)
+                  (rayfall--indent-same-line-p open (treesit-node-start first)))
+             (cons (treesit-node-start first) 0)
+           (cons open 1))))
+      ("pair" (cons open rayfall-indent-offset))
+      (_ (cons open rayfall-indent-offset)))))
+
+(defun rayfall--indent-anchor (node parent bol &rest _)
+  "Anchor of the line at BOL; see `rayfall--indent-target'."
+  (car (rayfall--indent-target node parent bol)))
+
+(defun rayfall--indent-offset (node parent bol &rest _)
+  "Offset of the line at BOL; see `rayfall--indent-target'."
+  (cdr (rayfall--indent-target node parent bol)))
+
+(defun rayfall--indent-inside-token-p (_node _parent bol &rest _)
+  "Return non-nil when the line at BOL continues a token, such as a string.
+Indenting such a line would change the token's text."
+  (let ((token (treesit-node-at bol)))
+    (and token (< (treesit-node-start token) bol (treesit-node-end token)))))
+
+(defun rayfall--indent-keep (_node _parent bol &rest _)
+  "Anchor that leaves the line at BOL where it is."
+  bol)
+
+(defconst rayfall--treesit-indent-rules
+  '((rayfall
+     (rayfall--indent-inside-token-p rayfall--indent-keep 0)
+     ((parent-is "source_file") column-0 0)
+     (catch-all rayfall--indent-anchor rayfall--indent-offset)))
   "Tree-sitter indentation rules for Rayfall.")
 
 (defun rayfall--require-grammar ()

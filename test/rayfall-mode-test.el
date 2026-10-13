@@ -18,15 +18,59 @@
                      "(set square (fn [x]\n(* x x)))")))
     (should (equal (mapcar #'car (rayfall--imenu-index)) '("square")))))
 
-(ert-deftest rayfall-mode-indents-nested-forms ()
-  (skip-unless (treesit-ready-p 'rayfall t))
+(defun rayfall-test--indent (text)
+  "Return TEXT, stripped of indentation, as `rayfall-mode' indents it."
   (with-temp-buffer
-    (insert "(select {from: trades\nwhere: (> price 100)})")
+    (insert (replace-regexp-in-string "^[ \t]+" "" text))
     (rayfall-mode)
     (indent-region (point-min) (point-max))
-    (goto-char (point-min))
-    (forward-line 1)
-    (should (= (current-indentation) rayfall-indent-offset))))
+    (buffer-string)))
+
+(defmacro rayfall-test--indents (name doc &rest cases)
+  "Define test NAME (DOC): each case is a string already indented right."
+  `(ert-deftest ,name ()
+     ,doc
+     (skip-unless (treesit-ready-p 'rayfall t))
+     (dolist (want (list ,@cases))
+       (should (equal (rayfall-test--indent want) want)))))
+
+(rayfall-test--indents rayfall-mode-indents-call-arguments
+  "Arguments line up under the first argument, or under the function."
+  "(list (select a)\n      (select b))"
+  "(concat\n \"a\"\n \"b\")"
+  "(if (> x 0) 1\n    (< x 0) -1\n    0)"
+  "(map (fn [i] (* i i))\n     (til n))")
+
+(rayfall-test--indents rayfall-mode-indents-bodies
+  "Body forms indent their body from their parenthesis, or from an
+enclosing body form that opens on the same line."
+  "(set f (fn [x]\n  (let y (* x x))\n  (+ y 1)))"
+  "(let lots\n  (map (fn [i]\n         (* i i))\n       (til n)))"
+  "(while (< j n)\n  (set j (+ j 1)))"
+  "(do\n  (println 1)\n  2)"
+  "(fn\n    [x]\n  x)")
+
+(rayfall-test--indents rayfall-mode-indents-data
+  "Vector elements and dictionary pairs line up with the first one."
+  "(select {from: trades\n         where: (> price 100)})"
+  "[1 2\n 3]"
+  "{\n a: 1\n b: 2}"
+  "{a:\n   (+ 1 2)}")
+
+(rayfall-test--indents rayfall-mode-indents-comments-and-closers
+  "Comments indent like code; a lone closer goes under its opener."
+  "(set f (fn [x]\n  ;; square it\n  (* x x)))"
+  "(list 1\n      2\n)")
+
+(ert-deftest rayfall-mode-keeps-string-continuation-lines ()
+  "Lines inside a multi-line string are text, not code."
+  (skip-unless (treesit-ready-p 'rayfall t))
+  (let ((src "(format\n\"a\n  b\n\" x)"))
+    (with-temp-buffer
+      (insert src)
+      (rayfall-mode)
+      (indent-region (point-min) (point-max))
+      (should (equal (buffer-string) "(format\n \"a\n  b\n\" x)")))))
 
 (ert-deftest rayfall-mode-distinguishes-hyphenated-functions-from-operators ()
   (skip-unless (treesit-ready-p 'rayfall t))

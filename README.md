@@ -62,6 +62,20 @@ Files ending in `.rfl` then open in `rayfall-mode`. The main commands are:
 | `M-.` | Jump to a `set`, `let`, or function-parameter definition |
 | `M-,` | Return from a definition jump |
 
+Indentation follows classic Lisp style. A call's arguments line up under its
+first argument, or under the function name when the first argument starts a
+new line; vector elements and dictionary pairs line up under the first one.
+The forms in `rayfall-indent-body-forms` (`fn`, `do`, `while`, `times`, `set`
+and `let` by default) indent their body by `rayfall-indent-offset` columns,
+counted from the outermost such form that opens on the same line, so
+`(set f (fn [x]` keeps its body at column 2. Lines inside a multi-line string
+are left alone. To indent files from a script:
+
+```sh
+emacs --batch -f package-initialize -L /path/to/tree-sitter-rayfall \
+  --eval "(require 'rayfall-mode)" FILE.rfl --eval '(progn (indent-region (point-min) (point-max)) (save-buffer))'
+```
+
 At point, completion candidates come from the live Rayforce session through
 `.repl.complete`, including built-ins, keywords, and user-defined global
 bindings. The mode registers this with Emacs's standard completion-at-point
