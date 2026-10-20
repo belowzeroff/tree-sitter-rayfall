@@ -62,6 +62,43 @@ enclosing body form that opens on the same line."
   "(set f (fn [x]\n  ;; square it\n  (* x x)))"
   "(list 1\n      2\n)")
 
+(rayfall-test--indents rayfall-mode-indents-timespan-dictionaries
+  "Timespan literals do not disturb dictionary or call indentation."
+  "(set cfg {start: 2026.01.01D00:00:00.000
+          period: 1D
+          steps: 3})"
+  "(set cfg {period: 0D01:00:00 steps: 3
+          buy_policy: 'REJECT})"
+  "(list [1D 0Nn
+       -0D00:00:00.000000001]
+      1.5e)")
+
+(ert-deftest rayfall-mode-highlights-new-literals ()
+  "New literals are single nodes with numeric or constant highlighting."
+  (skip-unless (treesit-ready-p 'rayfall t))
+  (dolist (literal '(("1D" "timespan" font-lock-number-face)
+                     ("-0D00:00:00.000000001" "timespan" font-lock-number-face)
+                     ("0Wn" "timespan" font-lock-number-face)
+                     ("-0Wn" "timespan" font-lock-number-face)
+                     ("1.5e" "float" font-lock-number-face)
+                     ("1e-3e" "float" font-lock-number-face)
+                     ("1e-3" "float" font-lock-number-face)
+                     ("0Nn" "null" font-lock-constant-face)
+                     ("0Ne" "null" font-lock-constant-face)
+                     ("0Ng" "null" font-lock-constant-face)))
+    (with-temp-buffer
+      (insert (car literal))
+      (rayfall-mode)
+      (font-lock-ensure)
+      (let* ((root (treesit-buffer-root-node 'rayfall))
+             (node (treesit-node-child root 0 t)))
+        (should (= (treesit-node-child-count root t) 1))
+        (should (equal (treesit-node-type node) (nth 1 literal)))
+        (should (equal (treesit-node-text node) (car literal))))
+      (dotimes (offset (length (car literal)))
+        (should (eq (get-text-property (1+ offset) 'face)
+                    (nth 2 literal)))))))
+
 (ert-deftest rayfall-mode-keeps-string-continuation-lines ()
   "Lines inside a multi-line string are text, not code."
   (skip-unless (treesit-ready-p 'rayfall t))

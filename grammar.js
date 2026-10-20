@@ -23,6 +23,7 @@ module.exports = grammar({
       $.vector,
       $.dictionary,
       $.timestamp,
+      $.timespan,
       $.date,
       $.time,
       $.null,
@@ -64,7 +65,7 @@ module.exports = grammar({
 
     boolean: _ => choice("true", "false"),
 
-    null: _ => token(prec(7, /0N[hidtplf]?/)),
+    null: _ => token(prec(7, /0N[hidtplfegn]?/)),
 
     hexadecimal: _ => token(prec(6, /-?0x[0-9A-Fa-f]+/)),
 
@@ -72,13 +73,21 @@ module.exports = grammar({
       /[0-9]{4}\.[0-9]{2}\.[0-9]{2}D[0-9]{2}:[0-9]{2}:[0-9]{2}\.[0-9]+/,
     )),
 
+    // Signed nanosecond durations. Rayforce also accepts compact clock tails
+    // and omitting seconds; value ranges are checked by the runtime.
+    timespan: _ => token(prec(6, choice(
+      /-?[0-9]{1,6}D(?:(?:[0-9]{2}:[0-9]{2}(?::[0-9]{2})?|[0-9]{1,6})(?:\.[0-9]+)?)?/,
+      /-?0Wn/,
+    ))),
+
     date: _ => token(prec(5, /[0-9]{4}\.[0-9]{2}\.[0-9]{2}/)),
 
-    time: _ => token(prec(5, /-?[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,3})?/)),
+    time: _ => token(prec(5, /-?[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]+)?/)),
 
     float: _ => token(prec(4, choice(
-      /-?[0-9]+\.[0-9]+(?:[eE][+-]?[0-9]+)?/,
-      /-?[0-9]+[eE][+-]?[0-9]+/,
+      /-?[0-9]+\.[0-9]+(?:[eE][+-]?[0-9]+)?e?/,
+      /-?[0-9]+[eE][+-]?[0-9]+e?/,
+      /-?[0-9]+e/,
     ))),
 
     integer: _ => token(prec(3, /-?[0-9]+[hi]?/)),

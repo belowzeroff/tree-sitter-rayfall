@@ -69,6 +69,10 @@
             "named": true
           },
           {
+            "type": "timespan",
+            "named": true
+          },
+          {
             "type": "timestamp",
             "named": true
           },
@@ -136,6 +140,10 @@
           },
           {
             "type": "time",
+            "named": true
+          },
+          {
+            "type": "timespan",
             "named": true
           },
           {
@@ -244,6 +252,10 @@
             "named": true
           },
           {
+            "type": "timespan",
+            "named": true
+          },
+          {
             "type": "timestamp",
             "named": true
           },
@@ -321,6 +333,10 @@
           "named": true
         },
         {
+          "type": "timespan",
+          "named": true
+        },
+        {
           "type": "timestamp",
           "named": true
         },
@@ -393,6 +409,10 @@
           },
           {
             "type": "time",
+            "named": true
+          },
+          {
+            "type": "timespan",
             "named": true
           },
           {
@@ -482,6 +502,10 @@
   },
   {
     "type": "time",
+    "named": true
+  },
+  {
+    "type": "timespan",
     "named": true
   },
   {

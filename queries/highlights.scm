@@ -6,7 +6,7 @@
 (keyword) @constant
 
 [(integer) (float) (hexadecimal)] @number
-[(date) (time) (timestamp)] @number
+[(date) (time) (timestamp) (timespan)] @number
 (null) @constant.builtin
 (boolean) @constant.builtin
 

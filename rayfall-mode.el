@@ -159,6 +159,7 @@ This does not affect expressions entered directly in the REPL."
      (date) @font-lock-number-face
      (time) @font-lock-number-face
      (timestamp) @font-lock-number-face
+     (timespan) @font-lock-number-face
      (boolean) @font-lock-constant-face
      (null) @font-lock-constant-face
      (keyword) @font-lock-constant-face)

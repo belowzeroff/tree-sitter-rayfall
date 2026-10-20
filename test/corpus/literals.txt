@@ -29,3 +29,52 @@ names and comments
   (comment)
   (identifier) (identifier) (identifier) (identifier) (identifier) (identifier)
   (comment))
+
+==================
+nanosecond timespans
+==================
+
+0D 1D -1D 0D01:00:00 1D12:34:56.123456789
+-0D00:00:00.000000001 106751D23:47:16.854775807 0Wn -0Wn
+
+---
+
+(source_file
+  (timespan) (timespan) (timespan) (timespan) (timespan) (timespan) (timespan) (timespan) (timespan))
+
+==================
+compact timespans and clock precision
+==================
+
+0D1 0D01 0D123 0D1234 0D12345 0D123456
+0D01:02 0D01:02.5 0D01:02:03.1234567890 09:30:00.123456789
+
+---
+
+(source_file
+  (timespan) (timespan) (timespan) (timespan) (timespan) (timespan) (timespan) (timespan) (timespan) (time))
+
+==================
+F32 suffixes and F64 exponents
+==================
+
+42e -42e 0e -0e 1.5e -1.5e 1e3e 1E-3e 1e+3e
+1e3 1E3 1e+3 1e-3 2.5e-3
+
+---
+
+(source_file
+  (float) (float) (float) (float) (float) (float) (float) (float) (float) (float) (float) (float) (float) (float))
+
+==================
+new typed nulls
+==================
+
+0Nn 0Ne 0Ng [1D 0Nn -1D] [1e -2.5e 0Ne]
+
+---
+
+(source_file
+  (null) (null) (null)
+  (vector (timespan) (null) (timespan))
+  (vector (float) (float) (null)))

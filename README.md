@@ -25,7 +25,16 @@ grammar without requiring Node.js or the Tree-sitter CLI. They use language
 ABI 14 for compatibility with the Tree-sitter versions commonly used by Emacs
 29 and newer.
 
-Rayfall source files conventionally use the `.rfl` extension.
+Rayfall source files conventionally use the `.rfl` extension. Literal support
+includes nanosecond timespans (`1D`, `0D01:00:00`,
+`-0D00:00:00.000000001`, `0Wn`, `-0Wn`), F32 suffixes (`42e`, `1.5e`,
+`1e-3e`), and typed nulls including `0Nn`, `0Ne`, and `0Ng`. Duration nodes
+are named `timespan`; F32 values use the existing `float` node. Numeric and
+calendar range validation belongs to the Rayforce runtime.
+
+After updating generated parser sources, rebuild the installed editor grammar
+with `M-x treesit-install-language-grammar` (choose `rayfall`) and restart
+Emacs so it loads the new shared library.
 
 For Emacs 29 or newer, the grammar can be registered directly from the
 Rayforce repository:
