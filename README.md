@@ -88,9 +88,11 @@ emacs --batch -f package-initialize -L /path/to/tree-sitter-rayfall \
 At point, completion candidates come from the live Rayforce session through
 `.repl.complete`, including built-ins, keywords, and user-defined global
 bindings. The mode registers this with Emacs's standard completion-at-point
-API, so it works with `completion-at-point`, Company, and Corfu without a
-mode-specific backend. Rayforce versions without `.repl.complete` cannot
-provide semantic candidates.
+API in both source buffers and the REPL's current input, so it works with
+`completion-at-point`, Company (`company-capf`), and Corfu without a
+mode-specific backend. With Company's default three-character minimum,
+type at least three characters or invoke `M-x company-complete` manually.
+Rayforce versions without `.repl.complete` cannot provide semantic candidates.
 
 The standard Emacs Xref commands find definitions in the current buffer and
 across `.rfl` files in the current project. This covers names introduced by

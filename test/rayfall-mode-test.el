@@ -403,4 +403,41 @@ enclosing body form that opens on the same line."
                       :type 'user-error)
         (should-not sent)))))
 
+(ert-deftest rayfall-cancelled-completion-prompt-allows-next-response ()
+  (with-temp-buffer
+    (setq rayfall-repl--completion-prompt-pending t)
+    (rayfall--cancel-prompt-timer)
+    (setq rayfall-repl--completion-request '(next-request))
+    (let (consumed)
+      (cl-letf (((symbol-function 'rayfall--complete-completion-request)
+                 (lambda ()
+                   (setq consumed t
+                         rayfall-repl--completion-request nil)
+                   t))
+                ((symbol-function 'run-at-time) (lambda (&rest _) nil)))
+        (rayfall--prompt-after-output "next completion response")
+        (should consumed)))))
+
+(ert-deftest rayfall-repl-registers-live-completion ()
+  (with-temp-buffer
+    (rayfall-repl-mode)
+    (should (memq #'rayfall-repl-completion-at-point
+                  completion-at-point-functions))))
+
+(ert-deftest rayfall-repl-completes-only-current-input ()
+  (with-temp-buffer
+    (insert "previous output\n‣ .sys.")
+    (let ((mark (copy-marker (- (point-max) 5))) called)
+      (cl-letf (((symbol-function 'get-buffer-process)
+                 (lambda (&optional _) 'test-process))
+                ((symbol-function 'process-mark) (lambda (_) mark))
+                ((symbol-function 'rayfall-completion-at-point)
+                 (lambda () (setq called t) '(live-candidates))))
+        (goto-char (point-min))
+        (should-not (rayfall-repl-completion-at-point))
+        (should-not called)
+        (goto-char (point-max))
+        (should (equal (rayfall-repl-completion-at-point)
+                       '(live-candidates)))))))
+
 ;;; rayfall-mode-test.el ends here

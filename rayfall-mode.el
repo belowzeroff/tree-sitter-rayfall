@@ -457,7 +457,8 @@ Indenting such a line would change the token's text."
   "Cancel the current REPL buffer's pending synthetic prompt."
   (when (timerp rayfall-repl--prompt-timer)
     (cancel-timer rayfall-repl--prompt-timer))
-  (setq rayfall-repl--prompt-timer nil))
+  (setq rayfall-repl--prompt-timer nil
+        rayfall-repl--completion-prompt-pending nil))
 
 (defun rayfall--hide-internal-output (output)
   "Make internal evaluation or completion OUTPUT invisible to Comint."
@@ -671,6 +672,8 @@ When OUTPUT-END is nil, use the current process mark."
               (expand-file-name "rayfall-history" user-emacs-directory))
   (setq-local comment-start ";")
   (setq-local comment-end "")
+  (add-hook 'completion-at-point-functions
+            #'rayfall-repl-completion-at-point nil t)
   (add-to-invisibility-spec rayfall--internal-output-invisibility)
   (add-hook 'comint-preoutput-filter-functions
             #'rayfall--hide-internal-output nil t)
@@ -760,6 +763,12 @@ from the minibuffer.  The new process becomes `rayfall-repl-buffer'."
              (candidates (rayfall--completion-candidates prefix)))
         (when candidates
           (list start end candidates :exclusive 'no))))))
+
+(defun rayfall-repl-completion-at-point ()
+  "Complete live Rayfall names only in the REPL's current input."
+  (let ((process (get-buffer-process (current-buffer))))
+    (when (and process (>= (point) (process-mark process)))
+      (rayfall-completion-at-point))))
 
 (defun rayfall-send-string (string &optional result-position)
   "Send STRING to the active inferior Rayfall process.
