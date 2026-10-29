@@ -134,6 +134,13 @@ This does not affect expressions entered directly in the REPL."
     table)
   "Syntax table used by `rayfall-mode'.")
 
+;; The syntax table treats a tick as punctuation, so a character literal
+;; holding a delimiter would otherwise open a string, list or comment.
+(defconst rayfall--syntax-propertize-function
+  (syntax-propertize-rules
+   ("'\\([][(){}\";]\\)'" (1 ".")))
+  "Neutralize delimiters that appear as character literals.")
+
 (defconst rayfall--special-forms
   (rx bos (or "do" "fn" "if" "let" "quote" "raise" "select" "set"
               "try" "update") eos))
@@ -881,6 +888,7 @@ When RESULT-POSITION is non-nil, display the resulting output there."
                 (bracket identifier function definition keyword operator)))
   (setq-local treesit-font-lock-settings rayfall--treesit-font-lock-settings)
   (setq-local treesit-simple-indent-rules rayfall--treesit-indent-rules)
+  (setq-local syntax-propertize-function rayfall--syntax-propertize-function)
   (setq-local indent-tabs-mode nil)
   (setq-local imenu-create-index-function #'rayfall--imenu-index)
   (add-hook 'completion-at-point-functions

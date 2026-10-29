@@ -94,7 +94,7 @@ module.exports = grammar({
 
     string: _ => token(seq(
       '"',
-      repeat(choice(/[^"\\]/, /\\./)),
+      repeat(choice(/[^"\\]/, /\\[\s\S]/)),
       '"',
     )),
 

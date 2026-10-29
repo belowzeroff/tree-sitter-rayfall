@@ -78,3 +78,14 @@ new typed nulls
   (null) (null) (null)
   (vector (timespan) (null) (timespan))
   (vector (float) (float) (null)))
+
+==================
+string line continuation
+==================
+
+"abc\
+def" x
+
+---
+
+(source_file (string) (identifier))
