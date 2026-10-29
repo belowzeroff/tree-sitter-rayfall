@@ -58,7 +58,7 @@ module.exports = grammar({
     ),
 
     // Rayfall's dictionary parser accepts the same ASCII dispatch class as
-    // names, except that dots are deliberately not valid in bare keys.
+    // names, including dots and slashes (`{a.b: 1}` is valid).
     dictionary_key: _ => token(/[A-Za-z0-9_!#$%&*+,\-\/.<=>?@^|~]+/),
 
     comment: _ => token(seq(";", /[^\n\r]*/)),

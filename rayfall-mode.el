@@ -142,8 +142,8 @@ This does not affect expressions entered directly in the REPL."
   "Neutralize delimiters that appear as character literals.")
 
 (defconst rayfall--special-forms
-  (rx bos (or "do" "fn" "if" "let" "quote" "raise" "select" "set"
-              "try" "update") eos))
+  (rx bos (or "do" "fn" "if" "let" "quote" "raise" "return" "select" "set"
+              "times" "try" "update" "while") eos))
 
 (defconst rayfall--operators
   (rx bos

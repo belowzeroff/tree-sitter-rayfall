@@ -30,7 +30,8 @@
 ((call
   function: (identifier) @keyword)
  (#any-of? @keyword
-  "do" "fn" "if" "let" "quote" "raise" "select" "set" "try" "update"))
+  "do" "fn" "if" "let" "quote" "raise" "return" "select" "set" "times" "try"
+  "update" "while"))
 
 ((identifier) @operator
  (#any-of? @operator
