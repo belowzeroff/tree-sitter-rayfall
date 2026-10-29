@@ -12,6 +12,7 @@
   ],
   "files": [
     "grammar.js",
+    "tree-sitter.json",
     "rayfall-mode.el",
     "queries",
     "src/**"
