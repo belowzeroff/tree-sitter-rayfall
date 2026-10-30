@@ -441,3 +441,14 @@ enclosing body form that opens on the same line."
                        '(live-candidates)))))))
 
 ;;; rayfall-mode-test.el ends here
+
+(ert-deftest rayfall-mode-ignores-delimiter-character-literals ()
+  "Character literals holding a delimiter do not unbalance the buffer."
+  (skip-unless (treesit-ready-p 'rayfall t))
+  (dolist (source '("(f '(' 1)" "(f ')' 1)" "(f '\"' 1)" "(f '[' ']' '{' '}' ';' 1)"))
+    (with-temp-buffer
+      (insert source)
+      (rayfall-mode)
+      (syntax-ppss-flush-cache (point-min))
+      (syntax-propertize (point-max))
+      (should-not (check-parens)))))
