@@ -89,3 +89,13 @@ def" x
 ---
 
 (source_file (string) (identifier))
+
+==================
+keywords use the full name class
+==================
+
+:a.b :a! :a<b :a*
+
+---
+
+(source_file (keyword) (keyword) (keyword) (keyword))

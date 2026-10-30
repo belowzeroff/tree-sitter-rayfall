@@ -109,7 +109,8 @@ module.exports = grammar({
     // parser's symbol-name character set and do not require a closing tick.
     quoted_symbol: _ => token(prec(2, /'[A-Za-z0-9_!#$%&*+,\-\/.<=>?@^|~]*/)),
 
-    keyword: _ => token(seq(":", /[A-Za-z0-9_.\-\/?]+/)),
+    // The reader scans a keyword with the full name character class.
+    keyword: _ => token(seq(":", /[A-Za-z0-9_!#$%&*+,\-\/.<=>?@^|~]+/)),
 
     identifier: _ => token(/[A-Za-z_!#$%&*+,\-\/.<=>?@^|~][A-Za-z0-9_!#$%&*+,\-\/.<=>?@^|~]*/),
   },
